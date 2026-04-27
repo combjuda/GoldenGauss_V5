@@ -1,0 +1,38 @@
+; GoldenGauss_V5 - BTCUSD Aggressive
+; Risk Profile: High Growth (Very High Risk)
+; Recommended Balance: $3000+
+; ⚠️ Expect 30%+ drawdowns
+
+MagicNumber=20260427
+LotSize=0.001
+MaxSpreadPips=80
+MaxPositions=2
+
+MaxDailyLossPercent=6.0
+MaxDrawdownPercent=25.0
+UseDynamicLotSizing=true
+RiskPerTrade=2.0
+
+StartHour=0
+EndHour=23
+UseTimeFilter=false
+
+ATRPeriod=21
+DefaultSLMultiplier=2.0
+DefaultTPMultiplier=3.0
+DefaultTrailingMultiplier=0.75
+
+ProbabilityThreshold=0.62
+StrongThreshold=0.78
+UseNormalization=true
+
+EnableSelfLearning=true
+RetrainEveryNTrades=30
+MinSamplesForRetrain=20
+RetrainLearningRate=0.002
+RetrainEpochs=25
+
+UseGBrain=true
+MinGBrainConfirm=0.25
+
+DataDirectory=GoldenGauss_Data

@@ -1,0 +1,37 @@
+; GoldenGauss_V5 - XAUUSD Aggressive
+; Risk Profile: High Growth (High Risk)
+; Recommended Balance: $1000+
+
+MagicNumber=20260426
+LotSize=0.01
+MaxSpreadPips=35
+MaxPositions=2
+
+MaxDailyLossPercent=5.0
+MaxDrawdownPercent=20.0
+UseDynamicLotSizing=true
+RiskPerTrade=2.0
+
+StartHour=12
+EndHour=20
+UseTimeFilter=true
+
+ATRPeriod=14
+DefaultSLMultiplier=1.2
+DefaultTPMultiplier=2.0
+DefaultTrailingMultiplier=0.5
+
+ProbabilityThreshold=0.60
+StrongThreshold=0.75
+UseNormalization=true
+
+EnableSelfLearning=true
+RetrainEveryNTrades=30
+MinSamplesForRetrain=20
+RetrainLearningRate=0.002
+RetrainEpochs=25
+
+UseGBrain=true
+MinGBrainConfirm=0.2
+
+DataDirectory=GoldenGauss_Data

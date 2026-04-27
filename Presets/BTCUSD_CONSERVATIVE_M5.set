@@ -1,0 +1,38 @@
+; GoldenGauss_V5 - BTCUSD Conservative
+; Risk Profile: Capital Preservation
+; Recommended Balance: $10000+
+; Note: Higher volatility requires wider stops
+
+MagicNumber=20260427
+LotSize=0.001
+MaxSpreadPips=50
+MaxPositions=1
+
+MaxDailyLossPercent=3.0
+MaxDrawdownPercent=12.0
+UseDynamicLotSizing=true
+RiskPerTrade=0.5
+
+StartHour=0
+EndHour=23
+UseTimeFilter=false
+
+ATRPeriod=21
+DefaultSLMultiplier=3.0
+DefaultTPMultiplier=4.0
+DefaultTrailingMultiplier=1.5
+
+ProbabilityThreshold=0.72
+StrongThreshold=0.88
+UseNormalization=true
+
+EnableSelfLearning=true
+RetrainEveryNTrades=80
+MinSamplesForRetrain=40
+RetrainLearningRate=0.0005
+RetrainEpochs=15
+
+UseGBrain=true
+MinGBrainConfirm=0.45
+
+DataDirectory=GoldenGauss_Data

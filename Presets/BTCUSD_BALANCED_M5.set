@@ -1,0 +1,37 @@
+; GoldenGauss_V5 - BTCUSD Balanced
+; Risk Profile: Moderate Growth
+; Recommended Balance: $5000+
+
+MagicNumber=20260427
+LotSize=0.001
+MaxSpreadPips=60
+MaxPositions=1
+
+MaxDailyLossPercent=4.0
+MaxDrawdownPercent=15.0
+UseDynamicLotSizing=true
+RiskPerTrade=1.0
+
+StartHour=0
+EndHour=23
+UseTimeFilter=false
+
+ATRPeriod=21
+DefaultSLMultiplier=2.5
+DefaultTPMultiplier=3.5
+DefaultTrailingMultiplier=1.0
+
+ProbabilityThreshold=0.68
+StrongThreshold=0.82
+UseNormalization=true
+
+EnableSelfLearning=true
+RetrainEveryNTrades=50
+MinSamplesForRetrain=30
+RetrainLearningRate=0.001
+RetrainEpochs=20
+
+UseGBrain=true
+MinGBrainConfirm=0.35
+
+DataDirectory=GoldenGauss_Data

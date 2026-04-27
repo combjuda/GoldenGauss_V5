@@ -1,0 +1,37 @@
+; GoldenGauss_V5 - XAUUSD Balanced
+; Risk Profile: Moderate Growth
+; Recommended Balance: $2000+
+
+MagicNumber=20260426
+LotSize=0.01
+MaxSpreadPips=30
+MaxPositions=1
+
+MaxDailyLossPercent=3.0
+MaxDrawdownPercent=12.0
+UseDynamicLotSizing=true
+RiskPerTrade=1.0
+
+StartHour=13
+EndHour=18
+UseTimeFilter=true
+
+ATRPeriod=14
+DefaultSLMultiplier=1.5
+DefaultTPMultiplier=2.5
+DefaultTrailingMultiplier=0.75
+
+ProbabilityThreshold=0.65
+StrongThreshold=0.80
+UseNormalization=true
+
+EnableSelfLearning=true
+RetrainEveryNTrades=50
+MinSamplesForRetrain=30
+RetrainLearningRate=0.001
+RetrainEpochs=20
+
+UseGBrain=true
+MinGBrainConfirm=0.3
+
+DataDirectory=GoldenGauss_Data

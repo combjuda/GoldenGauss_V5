@@ -1,0 +1,37 @@
+; GoldenGauss_V5 - XAUUSD Conservative
+; Risk Profile: Capital Preservation
+; Recommended Balance: $5000+
+
+MagicNumber=20260426
+LotSize=0.01
+MaxSpreadPips=25
+MaxPositions=1
+
+MaxDailyLossPercent=2.0
+MaxDrawdownPercent=8.0
+UseDynamicLotSizing=true
+RiskPerTrade=0.5
+
+StartHour=13
+EndHour=17
+UseTimeFilter=true
+
+ATRPeriod=14
+DefaultSLMultiplier=2.0
+DefaultTPMultiplier=3.0
+DefaultTrailingMultiplier=1.0
+
+ProbabilityThreshold=0.70
+StrongThreshold=0.85
+UseNormalization=true
+
+EnableSelfLearning=true
+RetrainEveryNTrades=100
+MinSamplesForRetrain=50
+RetrainLearningRate=0.0005
+RetrainEpochs=15
+
+UseGBrain=true
+MinGBrainConfirm=0.4
+
+DataDirectory=GoldenGauss_Data
