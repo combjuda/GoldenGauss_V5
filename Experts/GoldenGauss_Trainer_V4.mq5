@@ -43,6 +43,14 @@ input bool      ShowDetails   = true;
 //+------------------------------------------------------------------+
 //| GLOBAL VARIABLES                                                |
 //+------------------------------------------------------------------+
+// Extern arrays required by FeatureBuilder.mqh
+extern double g_close[];
+extern double g_open[];
+extern double g_high[];
+extern double g_low[];
+extern long   g_volume[];
+extern int    g_bars;
+
 CNeuralNetworkV4*  g_nnBuy       = NULL;
 CNeuralNetworkV4*  g_nnSell      = NULL;
 CTrainingBufferV4* g_trainBuf    = NULL;
@@ -52,25 +60,18 @@ double             g_stds[];
 int                g_numFeatures = NUM_FEATURES;
 
 //+------------------------------------------------------------------+
-//| ONINIT                                                          |
+//| Script entry - OnStart is the main script entry point            |
 //+------------------------------------------------------------------+
-int OnInit() {
-   Print("========================================");
-   Print("  GoldenGauss Trainer v1.00");
-   Print("  Symbol: ", _Symbol, " | TF: ", EnumToString(Period()));
-   Print("========================================");
-   
-   // Initialize arrays
+void OnStart() {
+   // Initialize
    ArrayResize(g_means, g_numFeatures);
    ArrayResize(g_stds, g_numFeatures);
    
-   // Initialize networks
    g_nnBuy  = new CNeuralNetworkV4(g_numFeatures, HiddenNeurons, 2, LearningRate);
    g_nnSell = new CNeuralNetworkV4(g_numFeatures, HiddenNeurons, 2, LearningRate);
    g_trainBuf = new CTrainingBufferV4(10000);
    g_valBuf   = new CTrainingBufferV4(5000);
    
-   // Register feature calculators
    g_featureBuilder.RegisterCalculator(new CVolatilityFeatures());
    g_featureBuilder.RegisterCalculator(new CMomentumFeatures());
    g_featureBuilder.RegisterCalculator(new CVWAPFeatures());
@@ -79,25 +80,14 @@ int OnInit() {
    g_featureBuilder.RegisterCalculator(new CMicroFeatures());
    g_featureBuilder.RegisterCalculator(new CTemporalFeatures());
    
-   return INIT_SUCCEEDED;
-}
-
-//+------------------------------------------------------------------+
-//| ONDEINIT                                                        |
-//+------------------------------------------------------------------+
-void OnDeinit(const int reason) {
+   TrainModels();
+   
+   // Cleanup
+   g_featureBuilder.FreeCalculators();
    if(g_nnBuy   != NULL) delete g_nnBuy;
    if(g_nnSell  != NULL) delete g_nnSell;
    if(g_trainBuf != NULL) delete g_trainBuf;
    if(g_valBuf   != NULL) delete g_valBuf;
-   g_featureBuilder.FreeCalculators();
-}
-
-//+------------------------------------------------------------------+
-//| ONSTART - Script Entry Point                                    |
-//+------------------------------------------------------------------+
-void OnStart() {
-   TrainModels();
 }
 
 //+------------------------------------------------------------------+
