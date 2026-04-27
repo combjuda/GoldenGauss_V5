@@ -6,7 +6,7 @@
 #property copyright "Peter"
 #property version   "1.02"
 #property description "GoldenGauss V5 - Professional Backtester"
-#property tester_set "Presets/XAUUSD_BALANCED_M5.set"
+//#property tester_set "XAUUSD_BALANCED_M5.set"
 
 #include <Trade/Trade.mqh>
 #include <GoldenGauss/Core/Types.mqh>
@@ -295,14 +295,18 @@ void OnTick() {
    if(current_bar == g_last_bar) return;
    g_last_bar = current_bar;
    
-   // Load price data (use Period() for consistency with OnInit)
+   // Load price data — require minimum bars for features
    g_bars = CopyClose(_Symbol, Period(), 0, 5000, g_close);
-   if(g_bars <= 0) return;
+   if(g_bars < 240) {
+      // Not enough bars loaded — skip this bar
+      g_last_bar = 0; // Force reload on next tick
+      return;
+   }
    
-   CopyOpen(_Symbol, Period(), 0, 5000, g_open);
-   CopyHigh(_Symbol, Period(), 0, 5000, g_high);
-   CopyLow(_Symbol, Period(), 0, 5000, g_low);
-   CopyTickVolume(_Symbol, Period(), 0, 5000, g_volume);
+   CopyOpen(_Symbol, Period(), 0, g_bars, g_open);
+   CopyHigh(_Symbol, Period(), 0, g_bars, g_high);
+   CopyLow(_Symbol, Period(), 0, g_bars, g_low);
+   CopyTickVolume(_Symbol, Period(), 0, g_bars, g_volume);
    
    // Time filter
    if(UseTimeFilter) {
@@ -320,8 +324,16 @@ void OnTick() {
    // Build features
    double features[];
    ArrayResize(features, NUM_FEATURES);
+   
+   // Debug: check g_bars and price data
+   if(g_bars < 240) {
+      Print("[Backtest] WARNING: g_bars=", g_bars, " < 240 (need at least 240 bars for features)");
+   }
+   
    if(!g_featureBuilder.BuildFeatures(features, NUM_FEATURES, g_bars)) {
-      Print("[Backtest] BuildFeatures failed at ", TimeToString(current_bar));
+      Print("[Backtest] BuildFeatures failed at ", TimeToString(current_bar),
+            " | g_bars=", g_bars, " | close[0]=", g_close[0],
+            " | close[1]=", g_close[1], " | high[0]=", g_high[0]);
       return;
    }
    
