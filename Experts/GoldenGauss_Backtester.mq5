@@ -6,8 +6,7 @@
 #property copyright "Peter"
 #property version   "1.02"
 #property description "GoldenGauss V5 - Professional Backtester"
-// Apply set file from the same directory as the EA
-#property tester_set file "Presets/XAUUSD_BALANCED_M5.set"
+#property tester_set "Presets/XAUUSD_BALANCED_M5.set"
 
 #include <Trade/Trade.mqh>
 #include <GoldenGauss/Core/Types.mqh>
