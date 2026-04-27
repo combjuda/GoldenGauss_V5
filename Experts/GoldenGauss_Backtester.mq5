@@ -1,15 +1,14 @@
 //+------------------------------------------------------------------+
 //| GoldenGauss_Backtester.mq5                                       |
 //| Professional Backtesting Framework for GoldenGauss_V5            |
-//| Peter - Version 1.01                                             |
+//| Peter - Version 1.02                                             |
 //+------------------------------------------------------------------+
 #property copyright "Peter"
-#property version   "1.01"
+#property version   "1.02"
 #property description "GoldenGauss V5 - Professional Backtester"
+// Apply set file from the same directory as the EA
+#property tester_set file "Presets/XAUUSD_BALANCED_M5.set"
 
-//+------------------------------------------------------------------+
-//| INCLUDES                                                         |
-//+------------------------------------------------------------------+
 #include <Trade/Trade.mqh>
 #include <GoldenGauss/Core/Types.mqh>
 #include <GoldenGauss/Core/NeuralNetworkV4.mqh>
@@ -23,7 +22,6 @@
 //| INPUT PARAMETERS                                                 |
 //+------------------------------------------------------------------+
 input group "=== Backtest Configuration ==="
-input string          SetFileName = "XAUUSD_Balanced.set";
 input double          InitialDeposit = 10000.0;
 input double          SlippagePips = 1.0;
 input double          CommissionPerLot = 3.5;
@@ -66,13 +64,13 @@ CBacktestMetrics    g_metrics;
 CBacktestLogger     g_logger;
 CBacktestReport     g_report;
 
-// Price buffers
+// Price buffers (pre-allocated to avoid reallocation on every tick)
 double            g_close[];
 double            g_open[];
 double            g_high[];
 double            g_low[];
 long              g_volume[];
-int               g_bars;
+int               g_bars = 0;
 
 // ATR handle
 int               g_atr_handle = INVALID_HANDLE;
@@ -93,56 +91,32 @@ double            g_peak_equity = 0;
 double            g_max_drawdown = 0;
 
 //+------------------------------------------------------------------+
-//| HEURISTIC SIGNAL FUNCTIONS (fallback when no models loaded)     |
+//| HELPER: Build model file path for FileOpen                       |
+//| FileOpen() searches in MQL5/Files/ automatically                |
 //+------------------------------------------------------------------+
-double HeuristicBuySignal() {
-   // Simple RSI-based heuristic
-   double gain = 0, loss = 0;
-   for(int j = 1; j <= 7 && (j + 1) < g_bars; j++) {
-      double diff = g_close[j] - g_close[j + 1];
-      if(diff > 0) gain += diff;
-      else loss += MathAbs(diff);
-   }
-   double rsi = 50;
-   if(loss > 0.00001) rsi = 100.0 - (100.0 / (1.0 + gain / loss));
-   
-   // Simple momentum
-   double roc = 0;
-   if(5 < g_bars) roc = (g_close[0] - g_close[5]) / (g_close[5] + 0.00001) * 100.0;
-   
-   // BUY when RSI < 45 and ROC > 0.1%
-   if(rsi < 45 && roc > 0.1) return 0.70;
-   return 0.0;
-}
-
-double HeuristicSellSignal() {
-   double gain = 0, loss = 0;
-   for(int j = 1; j <= 7 && (j + 1) < g_bars; j++) {
-      double diff = g_close[j] - g_close[j + 1];
-      if(diff > 0) gain += diff;
-      else loss += MathAbs(diff);
-   }
-   double rsi = 50;
-   if(loss > 0.00001) rsi = 100.0 - (100.0 / (1.0 + gain / loss));
-   
-   double roc = 0;
-   if(5 < g_bars) roc = (g_close[0] - g_close[5]) / (g_close[5] + 0.00001) * 100.0;
-   
-   // SELL when RSI > 55 and ROC < -0.1%
-   if(rsi > 55 && roc < -0.1) return 0.70;
-   return 0.0;
+string ModelPath(string filename) {
+   // FileOpen with relative path searches MQL5/Files/ subdirectory
+   string fullPath = DataDirectory + "_" + _Symbol + "//Models//" + filename;
+   return fullPath;
 }
 
 //+------------------------------------------------------------------+
 //| LOAD NORMALIZATION PARAMETERS                                    |
 //+------------------------------------------------------------------+
-bool LoadNormalizationParams(const string filename) {
-   string clean = CNeuralNetworkV4::PreparePath(filename);
-   int file = FileOpen(clean, FILE_READ | FILE_BIN);
-   if(file == INVALID_HANDLE) return false;
+bool LoadNormalizationParams() {
+   string filename = ModelPath("norm_params.dat");
+   int file = FileOpen(filename, FILE_READ | FILE_BIN);
+   if(file == INVALID_HANDLE) {
+      Print("[Backtest] Cannot open norm file: ", filename);
+      return false;
+   }
    
    int numFeatures = FileReadInteger(file);
-   if(numFeatures != NUM_FEATURES) { FileClose(file); return false; }
+   if(numFeatures != NUM_FEATURES) {
+      Print("[Backtest] Feature count mismatch! Expected ", NUM_FEATURES, ", got ", numFeatures);
+      FileClose(file);
+      return false;
+   }
    
    for(int j = 0; j < numFeatures; j++)
       g_feature_mean[j] = FileReadDouble(file);
@@ -150,15 +124,17 @@ bool LoadNormalizationParams(const string filename) {
       g_feature_std[j] = FileReadDouble(file);
    
    FileClose(file);
+   Print("[Backtest] Normalization loaded: ", numFeatures, " features");
    return true;
 }
 
 //+------------------------------------------------------------------+
-//| NORMALIZE FEATURES                                               |
+//| NORMALIZE FEATURES (z-score)                                     |
 //+------------------------------------------------------------------+
 void NormalizeFeatures(double &features[]) {
    if(!g_normalization_loaded) return;
-   for(int j = 0; j < ArraySize(features); j++) {
+   for(int j = 0; j < ArraySize(features) && j < NUM_FEATURES; j++) {
+      if(g_feature_std[j] < 0.00001) g_feature_std[j] = 1.0;
       features[j] = (features[j] - g_feature_mean[j]) / g_feature_std[j];
       features[j] = MathMax(-5.0, MathMin(5.0, features[j]));
    }
@@ -170,6 +146,7 @@ void NormalizeFeatures(double &features[]) {
 int OnInit() {
    Print("==================================================");
    Print("  GoldenGauss V5 - Professional Backtester");
+   Print("  Symbol: ", _Symbol, " | TF: ", EnumToString(Period()));
    Print("==================================================");
    Print("Initial Deposit: $", InitialDeposit);
    Print("Slippage: ", SlippagePips, " pips");
@@ -179,22 +156,28 @@ int OnInit() {
    if(EnableLogging)
       g_logger.Initialize(LogFileName);
    
-   // Initialize metrics with initial deposit
+   // Initialize metrics
    g_metrics.Initialize(InitialDeposit);
    
-   // Pre-allocate arrays
-   ArrayResize(g_close, 500); ArrayResize(g_open, 500);
-   ArrayResize(g_high, 500); ArrayResize(g_low, 500);
-   ArrayResize(g_volume, 500);
-   ArraySetAsSeries(g_close, true); ArraySetAsSeries(g_open, true);
-   ArraySetAsSeries(g_high, true); ArraySetAsSeries(g_low, true);
+   // Pre-allocate arrays with adequate size for lookback
+   int lookbackSize = 5000;
+   ArrayResize(g_close, lookbackSize);
+   ArrayResize(g_open, lookbackSize);
+   ArrayResize(g_high, lookbackSize);
+   ArrayResize(g_low, lookbackSize);
+   ArrayResize(g_volume, lookbackSize);
+   ArraySetAsSeries(g_close, true);
+   ArraySetAsSeries(g_open, true);
+   ArraySetAsSeries(g_high, true);
+   ArraySetAsSeries(g_low, true);
    ArraySetAsSeries(g_volume, true);
    
-   // Initialize normalization
-   ArrayInitialize(g_feature_mean, 0.0); ArrayInitialize(g_feature_std, 1.0);
+   // Initialize normalization arrays
+   ArrayInitialize(g_feature_mean, 0.0);
+   ArrayInitialize(g_feature_std, 1.0);
    
    // Initialize ATR
-   g_atr_handle = iATR(_Symbol, PERIOD_CURRENT, ATRPeriod);
+   g_atr_handle = iATR(_Symbol, Period(), ATRPeriod);
    if(g_atr_handle == INVALID_HANDLE) {
       Print("[Backtest] ERROR: Cannot create ATR handle!");
       return INIT_FAILED;
@@ -214,43 +197,45 @@ int OnInit() {
    g_tradeManager.SetLotSize(LotSize);
    g_tradeManager.SetMaxPositions(MaxPositions);
    
-   // Load models
+   // Initialize neural networks
    g_nnBuy = new CNeuralNetworkV4(NUM_FEATURES, 64, 2, 0.001);
    g_nnSell = new CNeuralNetworkV4(NUM_FEATURES, 64, 2, 0.001);
    
-   string sym = _Symbol;
-   string dataPath = "MQL5/Files/" + DataDirectory + "_" + sym + "/Models/";
+   // Build model paths
+   string buyPath = ModelPath(BuyModelPath);
+   string sellPath = ModelPath(SellModelPath);
    
-   Print("[Backtest] Looking for models in: ", dataPath);
+   Print("[Backtest] Loading BUY model:  ", buyPath);
+   Print("[Backtest] Loading SELL model:  ", sellPath);
    
-   bool buy_ok = g_nnBuy.Load(dataPath + BuyModelPath);
-   bool sell_ok = g_nnSell.Load(dataPath + SellModelPath);
+   bool buy_ok = g_nnBuy.Load(buyPath);
+   bool sell_ok = g_nnSell.Load(sellPath);
    g_models_loaded = buy_ok && sell_ok;
    
    if(g_models_loaded) {
       Print("[Backtest] Models loaded successfully");
    } else {
-      Print("[Backtest] WARNING: Models not loaded!");
-      Print("[Backtest] Please run GoldenGauss_EA_V5_Trainer first");
-      Print("[Backtest] Expected files:");
-      Print("  - ", dataPath, BuyModelPath);
-      Print("  - ", dataPath, SellModelPath);
-      Print("  - ", dataPath, "norm_params.dat");
-      Print("[Backtest] Using heuristic signal mode (no NN models)");
+      if(!buy_ok) Print("[Backtest] BUY model failed to load");
+      if(!sell_ok) Print("[Backtest] SELL model failed to load");
+      Print("[Backtest] Will use heuristic mode");
    }
    
-   // Load normalization
-   if(UseNormalization) {
-      g_normalization_loaded = LoadNormalizationParams(dataPath + "norm_params.dat");
+   // Load normalization if models loaded
+   if(UseNormalization && g_models_loaded) {
+      g_normalization_loaded = LoadNormalizationParams();
       if(!g_normalization_loaded) {
          Print("[Backtest] WARNING: Normalization params not found");
-         Print("[Backtest] Running without normalization");
+         Print("[Backtest] Features will be unnormalized");
       }
    }
    
-   // Initialize GBrain
+   // Initialize GBrain (on current chart period)
    if(UseGBrain) {
-      g_gbrain_handle = iCustom(_Symbol, PERIOD_CURRENT, "GBrain", 10, 80, 200, 0.002, 20, 0.3, 0);
+      g_gbrain_handle = iCustom(_Symbol, Period(), "GBrain", 10, 80, 200, 0.002, 20, 0.3, 0);
+      if(g_gbrain_handle != INVALID_HANDLE)
+         Print("[Backtest] GBrain indicator loaded");
+      else
+         Print("[Backtest] WARNING: GBrain indicator not found!");
    }
    
    // Initialize report
@@ -268,11 +253,18 @@ int OnInit() {
 //| ONDEINIT                                                         |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason) {
-   // Cleanup in proper order
+   // Free feature calculators first
    g_featureBuilder.FreeCalculators();
    
-   if(g_atr_handle != INVALID_HANDLE) IndicatorRelease(g_atr_handle);
-   if(g_gbrain_handle != INVALID_HANDLE) IndicatorRelease(g_gbrain_handle);
+   // Release indicators
+   if(g_atr_handle != INVALID_HANDLE) {
+      IndicatorRelease(g_atr_handle);
+      g_atr_handle = INVALID_HANDLE;
+   }
+   if(g_gbrain_handle != INVALID_HANDLE) {
+      IndicatorRelease(g_gbrain_handle);
+      g_gbrain_handle = INVALID_HANDLE;
+   }
    
    // Delete neural networks
    if(g_nnBuy != NULL) { delete g_nnBuy; g_nnBuy = NULL; }
@@ -283,52 +275,58 @@ void OnDeinit(const int reason) {
    Print("  BACKTEST COMPLETE");
    Print("==================================================");
    
-   // Calculate final metrics
    g_metrics.CalculateFinalMetrics();
-   
-   // Print summary
    g_metrics.PrintSummary();
    
-   // Generate HTML report
-   g_report.Generate(g_metrics, "Backtest/backtest_results.html");
+   // Save HTML report to Files directory
+   string reportPath = DataDirectory + "_" + _Symbol + "//backtest_report.html";
+   g_report.Generate(g_metrics, reportPath);
    
-   // Close logger
    if(EnableLogging)
       g_logger.Close();
    
-   Print("Full report saved to: Backtest/backtest_results.html");
+   Print("Report: ", reportPath);
 }
 
 //+------------------------------------------------------------------+
 //| ONTICK                                                           |
 //+------------------------------------------------------------------+
 void OnTick() {
-   datetime current_bar = iTime(_Symbol, PERIOD_CURRENT, 0);
+   datetime current_bar = iTime(_Symbol, Period(), 0);
    if(current_bar == g_last_bar) return;
    g_last_bar = current_bar;
    
-   // Update price data
-   g_bars = CopyClose(_Symbol, PERIOD_CURRENT, 0, 500, g_close);
+   // Load price data (use Period() for consistency with OnInit)
+   g_bars = CopyClose(_Symbol, Period(), 0, 5000, g_close);
    if(g_bars <= 0) return;
-   CopyOpen(_Symbol, PERIOD_CURRENT, 0, 500, g_open);
-   CopyHigh(_Symbol, PERIOD_CURRENT, 0, 500, g_high);
-   CopyLow(_Symbol, PERIOD_CURRENT, 0, 500, g_low);
-   CopyTickVolume(_Symbol, PERIOD_CURRENT, 0, 500, g_volume);
    
-   // Check trading hours
+   CopyOpen(_Symbol, Period(), 0, 5000, g_open);
+   CopyHigh(_Symbol, Period(), 0, 5000, g_high);
+   CopyLow(_Symbol, Period(), 0, 5000, g_low);
+   CopyTickVolume(_Symbol, Period(), 0, 5000, g_volume);
+   
+   // Time filter
    if(UseTimeFilter) {
-      MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
+      MqlDateTime dt;
+      TimeToStruct(current_bar, dt);
       if(dt.hour < StartHour || dt.hour >= EndHour) return;
    }
    
-   // Check spread
+   // Spread check
    if((int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) > MaxSpreadPips * 10) return;
+   
+   // Max positions check
    if(g_tradeManager.GetOpenPositions() >= MaxPositions) return;
    
    // Build features
    double features[];
    ArrayResize(features, NUM_FEATURES);
-   if(!g_featureBuilder.BuildFeatures(features, NUM_FEATURES, g_bars)) return;
+   if(!g_featureBuilder.BuildFeatures(features, NUM_FEATURES, g_bars)) {
+      Print("[Backtest] BuildFeatures failed at ", TimeToString(current_bar));
+      return;
+   }
+   
+   // Normalize
    NormalizeFeatures(features);
    
    // Get prediction
@@ -338,91 +336,122 @@ void OnTick() {
       double buy_probs[], sell_probs[];
       g_nnBuy.Predict(features, buy_probs);
       g_nnSell.Predict(features, sell_probs);
+      
       buy_prob = (ArraySize(buy_probs) >= 2) ? buy_probs[1] : 0.0;
       sell_prob = (ArraySize(sell_probs) >= 2) ? sell_probs[1] : 0.0;
+      
+      // Debug: print signal every 100 bars
+      static int s_debug_bar = 0;
+      if(s_debug_bar % 100 == 0) {
+         Print("[Signal] BUY=", DoubleToString(buy_prob, 3),
+               " SELL=", DoubleToString(sell_prob, 3),
+               " | gbrain=", DoubleToString(g_gbrain_signal()));
+      }
+      s_debug_bar++;
    } else {
-      // Heuristic fallback when no models are trained
+      // Heuristic fallback
       buy_prob = HeuristicBuySignal();
       sell_prob = HeuristicSellSignal();
    }
    
-   // Check GBrain confirmation
-   double gbrain_signal = 0.0;
+   // GBrain signal
+   double gbrain_sig = 0.0;
    if(UseGBrain && g_gbrain_handle != INVALID_HANDLE) {
       double buf[];
-      if(CopyBuffer(g_gbrain_handle, 3, 0, 1, buf) > 0)
-         gbrain_signal = buf[0];
+      if(CopyBuffer(g_gbrain_handle, 0, 0, 1, buf) > 0) {
+         gbrain_sig = buf[0];
+      }
    }
    
-   // Generate signal
+   // Signal generation
    ENUM_TRADE_SIGNAL signal = SIGNAL_NONE;
    double probability = 0.0;
    
-   if(buy_prob >= 0.65 && gbrain_signal >= MinGBrainConfirm) {
-      signal = (buy_prob >= 0.80) ? SIGNAL_BUY_STRONG : SIGNAL_BUY;
+   // Require minimum probability and GBrain confirmation
+   if(buy_prob >= 0.55 && gbrain_sig >= MinGBrainConfirm) {
+      signal = (buy_prob >= 0.75) ? SIGNAL_BUY_STRONG : SIGNAL_BUY;
       probability = buy_prob;
-   } else if(sell_prob >= 0.65 && gbrain_signal <= -MinGBrainConfirm) {
-      signal = (sell_prob >= 0.80) ? SIGNAL_SELL_STRONG : SIGNAL_SELL;
+   } else if(sell_prob >= 0.55 && gbrain_sig <= -MinGBrainConfirm) {
+      signal = (sell_prob >= 0.75) ? SIGNAL_SELL_STRONG : SIGNAL_SELL;
       probability = sell_prob;
    }
    
    if(signal == SIGNAL_NONE) return;
    
-   // Calculate stops
+   // Calculate ATR stops
    double atr = 0;
-   double buf[];
-   ArraySetAsSeries(buf, true);
-   if(CopyBuffer(g_atr_handle, 0, 0, 1, buf) > 0) atr = buf[0];
+   double atrBuf[];
+   ArraySetAsSeries(atrBuf, true);
+   if(CopyBuffer(g_atr_handle, 0, 0, 1, atrBuf) > 0)
+      atr = atrBuf[0];
+   
+   if(atr <= 0) {
+      Print("[Backtest] ATR is zero or invalid!");
+      return;
+   }
    
    double sl_pips = (atr / _Point) * DefaultSLMultiplier;
    double tp_pips = (atr / _Point) * DefaultTPMultiplier;
    double trailing_pips = (atr / _Point) * DefaultTrailingMultiplier;
    
+   // Enforce minimum stop distance
+   double minStop = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+   if(sl_pips * _Point < minStop) sl_pips = minStop / _Point;
+   if(tp_pips * _Point < minStop) tp_pips = minStop / _Point;
+   
    // Open trade
    ulong ticket = 0;
-   double entry_price = 0;
-   ENUM_ORDER_TYPE order_type = WRONG_VALUE;
    
    if(signal == SIGNAL_BUY || signal == SIGNAL_BUY_STRONG) {
-      entry_price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      order_type = ORDER_TYPE_BUY;
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       if(g_tradeManager.OpenBuyATR(probability, sl_pips, tp_pips, ticket)) {
-         g_metrics.RecordTradeOpen(ticket, order_type, entry_price, LotSize, 
+         g_metrics.RecordTradeOpen(ticket, ORDER_TYPE_BUY, ask, LotSize,
                                    sl_pips * _Point, tp_pips * _Point, current_bar);
          if(EnableLogging)
-            g_logger.LogTradeOpen(ticket, order_type, entry_price, LotSize, 
+            g_logger.LogTradeOpen(ticket, ORDER_TYPE_BUY, ask, LotSize,
                                   sl_pips * _Point, tp_pips * _Point, current_bar, probability);
+         Print("[Trade] BUY opened | Tkt: ", ticket, " | Prob: ", DoubleToString(probability, 3));
       }
    } else if(signal == SIGNAL_SELL || signal == SIGNAL_SELL_STRONG) {
-      entry_price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      order_type = ORDER_TYPE_SELL;
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       if(g_tradeManager.OpenSellATR(probability, sl_pips, tp_pips, ticket)) {
-         g_metrics.RecordTradeOpen(ticket, order_type, entry_price, LotSize,
+         g_metrics.RecordTradeOpen(ticket, ORDER_TYPE_SELL, bid, LotSize,
                                    sl_pips * _Point, tp_pips * _Point, current_bar);
          if(EnableLogging)
-            g_logger.LogTradeOpen(ticket, order_type, entry_price, LotSize,
+            g_logger.LogTradeOpen(ticket, ORDER_TYPE_SELL, bid, LotSize,
                                   sl_pips * _Point, tp_pips * _Point, current_bar, probability);
+         Print("[Trade] SELL opened | Tkt: ", ticket, " | Prob: ", DoubleToString(probability, 3));
       }
    }
    
    // Manage trailing stops
    for(int i = PositionsTotal() - 1; i >= 0; i--) {
       if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == 20260426) {
-         ulong t = (ulong)PositionGetInteger(POSITION_TICKET);
-         g_tradeManager.ManageTrailingStop(t, trailing_pips);
+         g_tradeManager.ManageTrailingStop(PositionGetInteger(POSITION_TICKET), trailing_pips);
       }
    }
    
-   // Update equity metrics
+   // Update equity tracking
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   g_metrics.UpdateEquity(equity, TimeCurrent());
+   g_metrics.UpdateEquity(equity, current_bar);
    
    if(equity > g_peak_equity)
       g_peak_equity = equity;
    
-   double drawdown = (g_peak_equity - equity) / g_peak_equity * 100.0;
-   if(drawdown > g_max_drawdown)
-      g_max_drawdown = drawdown;
+   double dd = (g_peak_equity - equity) / g_peak_equity * 100.0;
+   if(dd > g_max_drawdown)
+      g_max_drawdown = dd;
+}
+
+//+------------------------------------------------------------------+
+//| Helper: get current GBrain signal                                |
+//+------------------------------------------------------------------+
+double g_gbrain_signal() {
+   if(g_gbrain_handle == INVALID_HANDLE) return 0.0;
+   double buf[];
+   if(CopyBuffer(g_gbrain_handle, 0, 0, 1, buf) > 0)
+      return buf[0];
+   return 0.0;
 }
 
 //+------------------------------------------------------------------+
@@ -438,25 +467,22 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       if(HistoryDealGetInteger(deal_ticket, DEAL_MAGIC) != 20260426) return;
       if(HistoryDealGetInteger(deal_ticket, DEAL_ENTRY) != DEAL_ENTRY_OUT) return;
       
-      // Get trade details
       double profit = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT);
       double commission = HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION);
       datetime close_time = (datetime)HistoryDealGetInteger(deal_ticket, DEAL_TIME);
       ENUM_ORDER_TYPE type = (ENUM_ORDER_TYPE)HistoryDealGetInteger(deal_ticket, DEAL_TYPE);
       
-      // Calculate net profit (including slippage simulation)
-      double net_profit = profit - commission - (SlippagePips * _Point * LotSize * 2);
+      double net_profit = profit - commission;
       
-      // Record trade close
       g_metrics.RecordTradeClose(deal_ticket, net_profit, commission, close_time);
       
       if(EnableLogging)
          g_logger.LogTradeClose(type, net_profit, commission, close_time);
       
       g_total_trades++;
-      Print("[Backtest] Trade #", g_total_trades, 
-            " | Profit: $", DoubleToString(net_profit, 2),
-            " | Commission: $", DoubleToString(commission, 2));
+      Print("[Backtest] Trade #", g_total_trades,
+            " | PnL: $", DoubleToString(net_profit, 2),
+            " | Type: ", EnumToString(type));
    }
 }
 
@@ -466,7 +492,59 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 double OnTester() {
    g_metrics.CalculateFinalMetrics();
    double calmar = g_metrics.GetCalmarRatio();
-   Print("[OnTester] Calmar Ratio: ", DoubleToString(calmar, 3));
+   double sharpe = g_metrics.GetSharpeRatio();
+   Print("[OnTester] Calmar: ", DoubleToString(calmar, 3),
+         " | Sharpe: ", DoubleToString(sharpe, 3),
+         " | Trades: ", g_total_trades,
+         " | Balance: $", AccountInfoDouble(ACCOUNT_BALANCE));
    return calmar;
+}
+
+//+------------------------------------------------------------------+
+//| HEURISTIC FALLBACK SIGNALS                                       |
+//+------------------------------------------------------------------+
+double HeuristicBuySignal() {
+   if(g_bars < 20) return 0.0;
+   
+   double gain = 0, loss = 0;
+   for(int j = 1; j <= 7 && (j + 1) < g_bars; j++) {
+      double diff = g_close[j] - g_close[j + 1];
+      if(diff > 0) gain += diff;
+      else loss += MathAbs(diff);
+   }
+   
+   double rsi = 50;
+   if(loss > 0.00001)
+      rsi = 100.0 - (100.0 / (1.0 + gain / loss));
+   
+   double roc = 0;
+   if(5 < g_bars)
+      roc = (g_close[0] - g_close[5]) / (g_close[5] + 0.00001) * 100.0;
+   
+   // More relaxed: RSI < 50 and positive ROC
+   if(rsi < 50 && roc > 0.05) return 0.70;
+   return 0.0;
+}
+
+double HeuristicSellSignal() {
+   if(g_bars < 20) return 0.0;
+   
+   double gain = 0, loss = 0;
+   for(int j = 1; j <= 7 && (j + 1) < g_bars; j++) {
+      double diff = g_close[j] - g_close[j + 1];
+      if(diff > 0) gain += diff;
+      else loss += MathAbs(diff);
+   }
+   
+   double rsi = 50;
+   if(loss > 0.00001)
+      rsi = 100.0 - (100.0 / (1.0 + gain / loss));
+   
+   double roc = 0;
+   if(5 < g_bars)
+      roc = (g_close[0] - g_close[5]) / (g_close[5] + 0.00001) * 100.0;
+   
+   if(rsi > 50 && roc < -0.05) return 0.70;
+   return 0.0;
 }
 //+------------------------------------------------------------------+
