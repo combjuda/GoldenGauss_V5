@@ -93,6 +93,47 @@ double            g_peak_equity = 0;
 double            g_max_drawdown = 0;
 
 //+------------------------------------------------------------------+
+//| HEURISTIC SIGNAL FUNCTIONS (fallback when no models loaded)     |
+//+------------------------------------------------------------------+
+double HeuristicBuySignal() {
+   // Simple RSI-based heuristic
+   double gain = 0, loss = 0;
+   for(int j = 1; j <= 7 && (j + 1) < g_bars; j++) {
+      double diff = g_close[j] - g_close[j + 1];
+      if(diff > 0) gain += diff;
+      else loss += MathAbs(diff);
+   }
+   double rsi = 50;
+   if(loss > 0.00001) rsi = 100.0 - (100.0 / (1.0 + gain / loss));
+   
+   // Simple momentum
+   double roc = 0;
+   if(5 < g_bars) roc = (g_close[0] - g_close[5]) / (g_close[5] + 0.00001) * 100.0;
+   
+   // BUY when RSI < 45 and ROC > 0.1%
+   if(rsi < 45 && roc > 0.1) return 0.70;
+   return 0.0;
+}
+
+double HeuristicSellSignal() {
+   double gain = 0, loss = 0;
+   for(int j = 1; j <= 7 && (j + 1) < g_bars; j++) {
+      double diff = g_close[j] - g_close[j + 1];
+      if(diff > 0) gain += diff;
+      else loss += MathAbs(diff);
+   }
+   double rsi = 50;
+   if(loss > 0.00001) rsi = 100.0 - (100.0 / (1.0 + gain / loss));
+   
+   double roc = 0;
+   if(5 < g_bars) roc = (g_close[0] - g_close[5]) / (g_close[5] + 0.00001) * 100.0;
+   
+   // SELL when RSI > 55 and ROC < -0.1%
+   if(rsi > 55 && roc < -0.1) return 0.70;
+   return 0.0;
+}
+
+//+------------------------------------------------------------------+
 //| LOAD NORMALIZATION PARAMETERS                                    |
 //+------------------------------------------------------------------+
 bool LoadNormalizationParams(const string filename) {
@@ -299,6 +340,10 @@ void OnTick() {
       g_nnSell.Predict(features, sell_probs);
       buy_prob = (ArraySize(buy_probs) >= 2) ? buy_probs[1] : 0.0;
       sell_prob = (ArraySize(sell_probs) >= 2) ? sell_probs[1] : 0.0;
+   } else {
+      // Heuristic fallback when no models are trained
+      buy_prob = HeuristicBuySignal();
+      sell_prob = HeuristicSellSignal();
    }
    
    // Check GBrain confirmation
