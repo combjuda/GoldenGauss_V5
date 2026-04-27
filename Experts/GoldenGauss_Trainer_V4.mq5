@@ -117,6 +117,14 @@ void TrainModels() {
    CopyLow(_Symbol,    PERIOD_CURRENT, 0, LookbackBars, low);
    CopyTickVolume(_Symbol, PERIOD_CURRENT, 0, LookbackBars, volume);
    
+   // Copy into global arrays required by FeatureBuilder.mqh
+   g_bars = totalBars;
+   ArrayCopy(g_close,   close);
+   ArrayCopy(g_open,    open);
+   ArrayCopy(g_high,    high);
+   ArrayCopy(g_low,     low);
+   ArrayCopy(g_volume,  volume);
+   
    datetime firstBar = iTime(_Symbol, PERIOD_CURRENT, totalBars - 1);
    datetime lastBar  = iTime(_Symbol, PERIOD_CURRENT, 0);
    
