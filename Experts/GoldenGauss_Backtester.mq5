@@ -1,14 +1,14 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //| GoldenGauss_Backtester.mq5                                       |
 //| Professional Backtesting Framework for GoldenGauss_V5            |
-//| Peter - Version 1.00                                             |
+//| Peter - Version 1.01                                             |
 //+------------------------------------------------------------------+
 #property copyright "Peter"
-#property version   "1.00"
+#property version   "1.01"
 #property description "GoldenGauss V5 - Professional Backtester"
 
 //+------------------------------------------------------------------+
-//| INCLUDES - Corrected Paths                                       |
+//| INCLUDES                                                         |
 //+------------------------------------------------------------------+
 #include <Trade/Trade.mqh>
 #include <GoldenGauss/Core/Types.mqh>
@@ -31,8 +31,8 @@ input bool            EnableLogging = true;
 input string          LogFileName = "backtest_results.csv";
 
 input group "=== Model Files ==="
-input string          BuyModelPath = "BULLISH_V4.nn";
-input string          SellModelPath = "BEARISH_V4.nn";
+input string          BuyModelPath = "BULLISH_V5.nn";
+input string          SellModelPath = "BEARISH_V5.nn";
 input bool            UseNormalization = true;
 
 input group "=== Trading Parameters ==="
@@ -178,7 +178,6 @@ int OnInit() {
    g_nnSell = new CNeuralNetworkV4(NUM_FEATURES, 64, 2, 0.001);
    
    string sym = _Symbol;
-   // ✅ FIXED: Correct path construction
    string dataPath = "MQL5/Files/" + DataDirectory + "_" + sym + "/Models/";
    
    Print("[Backtest] Looking for models in: ", dataPath);
@@ -191,29 +190,21 @@ int OnInit() {
       Print("[Backtest] Models loaded successfully");
    } else {
       Print("[Backtest] WARNING: Models not loaded!");
-      Print("[Backtest] Please run GoldenGauss_Trainer_V4 first");
+      Print("[Backtest] Please run GoldenGauss_EA_V5_Trainer first");
       Print("[Backtest] Expected files:");
       Print("  - ", dataPath, BuyModelPath);
       Print("  - ", dataPath, SellModelPath);
       Print("  - ", dataPath, "norm_params.dat");
-      
-      // ✅ FALLBACK: Try heuristic mode
-      Print("[Backtest] Will use heuristic mode (no neural network)");
-   }
-   
-   // Load normalization
-   if(UseNormalization) {
-      string normFile = dataPath + "norm_params.dat";
-      g_normalization_loaded = LoadNormalizationParams(normFile);
-      if(!g_normalization_loaded) {
-         Print("[Backtest] WARNING: Normalization params not found");
-         Print("[Backtest] Running without normalization");
-      }
+      Print("[Backtest] Using heuristic signal mode (no NN models)");
    }
    
    // Load normalization
    if(UseNormalization) {
       g_normalization_loaded = LoadNormalizationParams(dataPath + "norm_params.dat");
+      if(!g_normalization_loaded) {
+         Print("[Backtest] WARNING: Normalization params not found");
+         Print("[Backtest] Running without normalization");
+      }
    }
    
    // Initialize GBrain
@@ -233,12 +224,18 @@ int OnInit() {
 }
 
 //+------------------------------------------------------------------+
+//| ONDEINIT                                                         |
+//+------------------------------------------------------------------+
 void OnDeinit(const int reason) {
+   // Cleanup in proper order
+   g_featureBuilder.FreeCalculators();
+   
    if(g_atr_handle != INVALID_HANDLE) IndicatorRelease(g_atr_handle);
    if(g_gbrain_handle != INVALID_HANDLE) IndicatorRelease(g_gbrain_handle);
-   if(g_nnBuy != NULL) delete g_nnBuy;
-   if(g_nnSell != NULL) delete g_nnSell;
-   g_featureBuilder.FreeCalculators();
+   
+   // Delete neural networks
+   if(g_nnBuy != NULL) { delete g_nnBuy; g_nnBuy = NULL; }
+   if(g_nnSell != NULL) { delete g_nnSell; g_nnSell = NULL; }
    
    // Generate final report
    Print("==================================================");
@@ -252,15 +249,17 @@ void OnDeinit(const int reason) {
    g_metrics.PrintSummary();
    
    // Generate HTML report
-   g_report.Generate(g_metrics, "MQL5/Files/Backtest/Results/backtest_report.html");
+   g_report.Generate(g_metrics, "Backtest/backtest_results.html");
    
    // Close logger
    if(EnableLogging)
       g_logger.Close();
    
-   Print("Full report saved to: MQL5/Files/Backtest/Results/backtest_report.html");
+   Print("Full report saved to: Backtest/backtest_results.html");
 }
 
+//+------------------------------------------------------------------+
+//| ONTICK                                                           |
 //+------------------------------------------------------------------+
 void OnTick() {
    datetime current_bar = iTime(_Symbol, PERIOD_CURRENT, 0);
@@ -292,12 +291,15 @@ void OnTick() {
    NormalizeFeatures(features);
    
    // Get prediction
-   double buy_probs[], sell_probs[];
-   g_nnBuy.Predict(features, buy_probs);
-   g_nnSell.Predict(features, sell_probs);
+   double buy_prob = 0.0, sell_prob = 0.0;
    
-   double buy_prob = (ArraySize(buy_probs) >= 2) ? buy_probs[1] : 0.0;
-   double sell_prob = (ArraySize(sell_probs) >= 2) ? sell_probs[1] : 0.0;
+   if(g_models_loaded) {
+      double buy_probs[], sell_probs[];
+      g_nnBuy.Predict(features, buy_probs);
+      g_nnSell.Predict(features, sell_probs);
+      buy_prob = (ArraySize(buy_probs) >= 2) ? buy_probs[1] : 0.0;
+      sell_prob = (ArraySize(sell_probs) >= 2) ? sell_probs[1] : 0.0;
+   }
    
    // Check GBrain confirmation
    double gbrain_signal = 0.0;
@@ -323,7 +325,8 @@ void OnTick() {
    
    // Calculate stops
    double atr = 0;
-   double buf[]; ArraySetAsSeries(buf, true);
+   double buf[];
+   ArraySetAsSeries(buf, true);
    if(CopyBuffer(g_atr_handle, 0, 0, 1, buf) > 0) atr = buf[0];
    
    double sl_pips = (atr / _Point) * DefaultSLMultiplier;
@@ -378,6 +381,8 @@ void OnTick() {
 }
 
 //+------------------------------------------------------------------+
+//| ONTRADETRANSACTION                                               |
+//+------------------------------------------------------------------+
 void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result) {
@@ -410,6 +415,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    }
 }
 
+//+------------------------------------------------------------------+
+//| ONTESTER                                                         |
 //+------------------------------------------------------------------+
 double OnTester() {
    g_metrics.CalculateFinalMetrics();
