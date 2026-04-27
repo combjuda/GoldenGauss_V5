@@ -207,6 +207,24 @@ int OnInit() {
    Print("[Backtest] Loading BUY model:  ", buyPath);
    Print("[Backtest] Loading SELL model:  ", sellPath);
    
+   // DEBUG: Test if files actually exist via FileOpen
+   int testFile = FileOpen(ModelPath(BuyModelPath), FILE_READ | FILE_BIN);
+   if(testFile != INVALID_HANDLE) {
+      Print("[Backtest] DEBUG: FileOpen SUCCESS for BUY model");
+      FileClose(testFile);
+   } else {
+      Print("[Backtest] DEBUG: FileOpen FAILED for BUY model, trying raw path...");
+      // Try raw (no DataDirectory prefix)
+      string rawBuyPath = "GoldenGauss_Data_XAUUSD+/Models/" + BuyModelPath;
+      int testFile2 = FileOpen(rawBuyPath, FILE_READ | FILE_BIN);
+      if(testFile2 != INVALID_HANDLE) {
+         Print("[Backtest] DEBUG: Raw path works: ", rawBuyPath);
+         FileClose(testFile2);
+      } else {
+         Print("[Backtest] DEBUG: Raw path also fails: ", rawBuyPath);
+      }
+   }
+   
    bool buy_ok = g_nnBuy.Load(buyPath);
    bool sell_ok = g_nnSell.Load(sellPath);
    g_models_loaded = buy_ok && sell_ok;
