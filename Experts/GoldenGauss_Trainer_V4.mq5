@@ -43,13 +43,13 @@ input bool      ShowDetails   = true;
 //+------------------------------------------------------------------+
 //| GLOBAL VARIABLES                                                |
 //+------------------------------------------------------------------+
-// Extern arrays required by FeatureBuilder.mqh
-extern double g_close[];
-extern double g_open[];
-extern double g_high[];
-extern double g_low[];
-extern long   g_volume[];
-extern int    g_bars;
+// Global arrays required by FeatureBuilder.mqh (extern declarations there)
+double g_close[];
+double g_open[];
+double g_high[];
+double g_low[];
+long   g_volume[];
+int    g_bars;
 
 CNeuralNetworkV4*  g_nnBuy       = NULL;
 CNeuralNetworkV4*  g_nnSell      = NULL;
@@ -439,7 +439,7 @@ bool SaveNormalization(const string filename) {
       FileWriteDouble(file, g_stds[j]);
    }
    
-   long bytes = FileTell(file);
+   ulong bytes = FileTell(file);
    FileClose(file);
    
    Print("  Normalization: ", bytes, " bytes");
